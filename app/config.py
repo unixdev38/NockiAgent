@@ -77,6 +77,12 @@ class Settings(BaseSettings):
     # --- Memory -------------------------------------------------------------
     database_path: Path = Field(default=Path("./data/nocki.db"))
 
+    # --- API (Phase 5) --------------------------------------------------------
+    api_host: str = Field(default="0.0.0.0", description="Bind host of the FastAPI server.")
+    api_port: int = Field(
+        default=8000, ge=1, le=65535, description="Bind port of the FastAPI server."
+    )
+
     # --- Observability ------------------------------------------------------
     log_level: LogLevel = Field(default=LogLevel.INFO)
 

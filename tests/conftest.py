@@ -45,6 +45,9 @@ class FakeLLM(LLMProvider):
     def is_available(self) -> bool:
         return self._available
 
+    def set_model(self, model: str) -> None:
+        self.model = model
+
     def invoke(
         self,
         messages: Sequence[BaseMessage],

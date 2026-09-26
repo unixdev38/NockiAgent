@@ -2,9 +2,9 @@
 
 Run with:  python -m app.main   (or the `nocki` console script)
 
-The CLI keeps *all* logic in the agent/service layer; it only handles I/O,
-slash-commands and rendering. This respects the rule "no business logic in
-main.py".
+The CLI is a *thin* layer on top of `NockiService` (the same core the HTTP
+API uses): it only handles I/O, slash-commands and rendering. No business
+logic here — that is a hard project rule.
 """
 
 from __future__ import annotations
@@ -17,14 +17,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from app.agent.graph import AgentEvent, AgentRuntime, EventType
-from app.config import get_settings, reload_settings
+from app.agent.graph import AgentEvent, EventType
+from app.config import get_settings
 from app.llm.base import ModelNotFoundError
-from app.llm.ollama import build_llm
 from app.logging_config import setup_logging
-from app.memory.database import Database
-from app.memory.manager import MemoryManager
-from app.tools.registry import build_default_registry
+from app.service import NockiService
 
 console = Console()
 
@@ -53,35 +50,26 @@ class NockiCLI:
         self.settings = get_settings()
         self.settings.ensure_directories()
         setup_logging(self.settings.log_level.value)
-        self.llm = build_llm(self.settings)
-        self.registry = build_default_registry(self.settings)
-        self.database = Database(self.settings.database_path)
-        self.memory = MemoryManager(self.database)
+        self.service = NockiService(self.settings)
         self.session_id = uuid.uuid4().hex[:8]
-        self.runtime = self._build_runtime()
-
-    def _build_runtime(self) -> AgentRuntime:
-        """Runtime wired with the persistent memory and the tool registry."""
-        return AgentRuntime(
-            self.llm, self.settings, registry=self.registry, memory=self.memory
-        )
 
     # -- rendering -----------------------------------------------------------
     def print_banner(self) -> None:
         console.print(BANNER)
-        console.print(f"[dim]Model:[/dim]     {self.settings.ollama_model}")
+        console.print(f"[dim]Model:[/dim]     {self.service.llm.model}")
         console.print(f"[dim]Workspace:[/dim] {self.settings.workspace}")
-        console.print(f"[dim]Tools:[/dim]     {', '.join(self.registry.names)}")
+        console.print(f"[dim]Mémoire:[/dim]   {self.settings.database_path}")
+        console.print(f"[dim]Tools:[/dim]     {', '.join(self.service.registry.names)}")
         console.print(f"[dim]Session:[/dim]   {self.session_id}")
         console.print("[dim]Tape /help pour les commandes.[/dim]\n")
 
     def check_backend(self) -> None:
-        if not self.llm.is_available():
+        if not self.service.llm.is_available():
             console.print(
                 Panel.fit(
                     f"[yellow]⚠ Ollama injoignable sur {self.settings.ollama_base_url}.[/yellow]\n"
                     "Lance le serveur avec [bold]ollama serve[/bold], puis "
-                    f"[bold]ollama pull {self.settings.ollama_model}[/bold].\n"
+                    f"[bold]ollama pull {self.service.llm.model}[/bold].\n"
                     "Le CLI reste utilisable ; les réponses échoueront proprement "
                     "tant qu'Ollama est hors ligne.",
                     title="Backend",
@@ -90,7 +78,7 @@ class NockiCLI:
             )
             return
         try:
-            self.llm.ensure_model()
+            self.service.llm.ensure_model()
         except ModelNotFoundError as exc:
             console.print(
                 Panel.fit(f"[yellow]{exc}[/yellow]", title="Modèle", border_style="yellow")
@@ -132,25 +120,20 @@ class NockiCLI:
         table.add_column("Nom", style="cyan")
         table.add_column("Permission")
         table.add_column("Description", overflow="fold")
-        for spec in self.registry.specs():
+        for spec in self.service.tool_specs():
             table.add_row(spec["name"], spec["permission"], spec["description"])
         console.print(table)
 
     def _model(self, arg: str) -> None:
         if not arg:
-            console.print(f"[dim]Modèle actuel:[/dim] {self.settings.ollama_model}")
+            console.print(f"[dim]Modèle actuel:[/dim] {self.service.llm.model}")
             return
-        import os
-
-        os.environ["OLLAMA_MODEL"] = arg
-        self.settings = reload_settings()
-        self.llm = build_llm(self.settings)
-        self.runtime = self._build_runtime()
+        self.service.set_model(arg)
         console.print(f"[green]Modèle changé:[/green] {arg}")
         self.check_backend()
 
     def _show_sessions(self) -> None:
-        sessions = self.memory.list_sessions()
+        sessions = self.service.list_sessions()
         if not sessions:
             console.print("[dim]Aucune session enregistrée.[/dim]")
             return
@@ -168,14 +151,14 @@ class NockiCLI:
         if not arg:
             console.print("Usage: /session <id>  (voir /sessions)")
             return
-        if self.memory.get_session(arg) is None:
+        if self.service.get_session(arg) is None:
             console.print(f"[yellow]Session inconnue: {arg}[/yellow] — voir /sessions.")
             return
         self.session_id = arg
         console.print(f"[green]Session active:[/green] {arg} (/history pour le contexte).")
 
     def _show_history(self) -> None:
-        messages = self.runtime.history(self.session_id)
+        messages = self.service.runtime.history(self.session_id)
         if not messages:
             console.print("[dim]Historique vide.[/dim]")
             return
@@ -210,7 +193,7 @@ class NockiCLI:
             console.print(event.text, markup=False, highlight=False)
 
     def chat(self, message: str) -> None:
-        for event in self.runtime.stream_events(message, session_id=self.session_id):
+        for event in self.service.stream_events(message, session_id=self.session_id):
             self._render_event(event)
 
     # -- main loop -----------------------------------------------------------
