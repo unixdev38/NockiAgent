@@ -1,19 +1,25 @@
 """LangGraph-based agent: typed state, prompts, nodes and workflow.
 
-LangGraph owns orchestration; the LLM only provides inference. In Phase 1 the
-graph is a single controlled reasoning step, but the state and node structure
-are already shaped for the full Understand → Plan → Tool → Observe → Evaluate
-loop of later phases.
+LangGraph owns orchestration; the LLM only provides inference. Since Phase 2
+the graph is a bounded reason ⇄ tools loop where every tool call is
+permission-checked by the application before execution.
 """
 
-from app.agent.graph import AgentRuntime, build_graph
+from app.agent.graph import (
+    AgentEvent,
+    AgentRuntime,
+    EventType,
+    build_graph,
+)
 from app.agent.state import AgentState, Observation, Plan, ToolCall
 
 __all__ = [
+    "AgentEvent",
     "AgentRuntime",
-    "build_graph",
     "AgentState",
+    "EventType",
     "Observation",
     "Plan",
     "ToolCall",
+    "build_graph",
 ]

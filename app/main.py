@@ -1,10 +1,10 @@
-"""Nocki Agent — command-line interface (Phase 1).
+"""Nocki Agent — command-line interface.
 
 Run with:  python -m app.main   (or the `nocki` console script)
 
-The CLI keeps *all* logic in the agent/graph layer; it only handles I/O,
-slash-commands and rendering. This respects the rule "no business logic in
-main.py".
+The CLI is a *thin* layer on top of `NockiService` (the same core the HTTP
+API uses): it only handles I/O, slash-commands and rendering. No business
+logic here — that is a hard project rule.
 """
 
 from __future__ import annotations
@@ -12,16 +12,16 @@ from __future__ import annotations
 import sys
 import uuid
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from app.agent.graph import AgentRuntime
-from app.config import get_settings, reload_settings
+from app.agent.graph import AgentEvent, EventType
+from app.config import get_settings
 from app.llm.base import ModelNotFoundError
-from app.llm.ollama import build_llm
 from app.logging_config import setup_logging
+from app.service import NockiService
 
 console = Console()
 
@@ -37,13 +37,12 @@ HELP = """\
   /tools       Lister les outils disponibles
   /model       Afficher / changer le modèle (ex: /model qwen3)
   /workspace   Afficher le workspace
-  /clear       Effacer la conversation courante
-  /history     Afficher l'historique de la session
+  /sessions    Lister les sessions enregistrées
+  /session     Basculer vers une session existante (ex: /session abc123)
+  /clear       Nouvelle conversation
+  /history     Historique de la session (persistant)
   /exit        Quitter
 """
-
-# Phase 1 has no tools yet; kept explicit so /tools reflects reality.
-AVAILABLE_TOOLS: list[str] = []
 
 
 class NockiCLI:
@@ -51,27 +50,26 @@ class NockiCLI:
         self.settings = get_settings()
         self.settings.ensure_directories()
         setup_logging(self.settings.log_level.value)
-        self.llm = build_llm(self.settings)
-        self.runtime = AgentRuntime(
-            self.llm, self.settings, available_tools=AVAILABLE_TOOLS
-        )
+        self.service = NockiService(self.settings)
         self.session_id = uuid.uuid4().hex[:8]
 
     # -- rendering -----------------------------------------------------------
     def print_banner(self) -> None:
         console.print(BANNER)
-        console.print(f"[dim]Model:[/dim]     {self.settings.ollama_model}")
+        console.print(f"[dim]Model:[/dim]     {self.service.llm.model}")
         console.print(f"[dim]Workspace:[/dim] {self.settings.workspace}")
+        console.print(f"[dim]Mémoire:[/dim]   {self.settings.database_path}")
+        console.print(f"[dim]Tools:[/dim]     {', '.join(self.service.registry.names)}")
         console.print(f"[dim]Session:[/dim]   {self.session_id}")
         console.print("[dim]Tape /help pour les commandes.[/dim]\n")
 
     def check_backend(self) -> None:
-        if not self.llm.is_available():
+        if not self.service.llm.is_available():
             console.print(
                 Panel.fit(
                     f"[yellow]⚠ Ollama injoignable sur {self.settings.ollama_base_url}.[/yellow]\n"
                     "Lance le serveur avec [bold]ollama serve[/bold], puis "
-                    f"[bold]ollama pull {self.settings.ollama_model}[/bold].\n"
+                    f"[bold]ollama pull {self.service.llm.model}[/bold].\n"
                     "Le CLI reste utilisable ; les réponses échoueront proprement "
                     "tant qu'Ollama est hors ligne.",
                     title="Backend",
@@ -80,7 +78,7 @@ class NockiCLI:
             )
             return
         try:
-            self.llm.ensure_model()
+            self.service.llm.ensure_model()
         except ModelNotFoundError as exc:
             console.print(
                 Panel.fit(f"[yellow]{exc}[/yellow]", title="Modèle", border_style="yellow")
@@ -106,60 +104,99 @@ class NockiCLI:
             console.print(f"[dim]Workspace:[/dim] {self.settings.workspace}")
         elif cmd == "/clear":
             self.session_id = uuid.uuid4().hex[:8]
-            console.print(f"[green]Conversation réinitialisée[/green] (session {self.session_id}).")
+            console.print(f"[green]Nouvelle conversation[/green] (session {self.session_id}).")
         elif cmd == "/history":
             self._show_history()
+        elif cmd == "/sessions":
+            self._show_sessions()
+        elif cmd == "/session":
+            self._switch_session(arg)
         else:
             console.print(f"[yellow]Commande inconnue: {cmd}[/yellow] — tape /help.")
         return True
 
     def _show_tools(self) -> None:
-        if not AVAILABLE_TOOLS:
-            console.print(
-                "[dim]Aucun outil disponible (Phase 1). Les outils arrivent en Phase 2.[/dim]"
-            )
-            return
         table = Table(title="Outils")
-        table.add_column("Nom")
-        for tool in AVAILABLE_TOOLS:
-            table.add_row(tool)
+        table.add_column("Nom", style="cyan")
+        table.add_column("Permission")
+        table.add_column("Description", overflow="fold")
+        for spec in self.service.tool_specs():
+            table.add_row(spec["name"], spec["permission"], spec["description"])
         console.print(table)
 
     def _model(self, arg: str) -> None:
         if not arg:
-            console.print(f"[dim]Modèle actuel:[/dim] {self.settings.ollama_model}")
+            console.print(f"[dim]Modèle actuel:[/dim] {self.service.llm.model}")
             return
-        import os
-
-        os.environ["OLLAMA_MODEL"] = arg
-        self.settings = reload_settings()
-        self.llm = build_llm(self.settings)
-        self.runtime = AgentRuntime(self.llm, self.settings, available_tools=AVAILABLE_TOOLS)
+        self.service.set_model(arg)
         console.print(f"[green]Modèle changé:[/green] {arg}")
         self.check_backend()
 
+    def _show_sessions(self) -> None:
+        sessions = self.service.list_sessions()
+        if not sessions:
+            console.print("[dim]Aucune session enregistrée.[/dim]")
+            return
+        table = Table(title="Sessions")
+        table.add_column("ID", style="cyan")
+        table.add_column("Mise à jour")
+        table.add_column("Messages", justify="right")
+        for info in sessions:
+            marker = " (courante)" if info.id == self.session_id else ""
+            updated = info.updated_at.strftime("%Y-%m-%d %H:%M")
+            table.add_row(info.id + marker, updated, str(info.message_count))
+        console.print(table)
+
+    def _switch_session(self, arg: str) -> None:
+        if not arg:
+            console.print("Usage: /session <id>  (voir /sessions)")
+            return
+        if self.service.get_session(arg) is None:
+            console.print(f"[yellow]Session inconnue: {arg}[/yellow] — voir /sessions.")
+            return
+        self.session_id = arg
+        console.print(f"[green]Session active:[/green] {arg} (/history pour le contexte).")
+
     def _show_history(self) -> None:
-        messages = self.runtime.history(self.session_id)
+        messages = self.service.runtime.history(self.session_id)
         if not messages:
             console.print("[dim]Historique vide.[/dim]")
             return
         for msg in messages:
-            role = "You" if isinstance(msg, HumanMessage) else "Nocki"
-            style = "cyan" if isinstance(msg, HumanMessage) else "green"
+            if isinstance(msg, HumanMessage):
+                role, style = "You", "cyan"
+            elif isinstance(msg, AIMessage):
+                role, style = "Nocki", "green"
+            else:
+                role, style = type(msg).__name__, "dim"
             text = msg.content if isinstance(msg.content, str) else str(msg.content)
-            console.print(f"[bold {style}]{role}:[/bold {style}] {text}")
+            console.print(f"{role}:", style=f"bold {style}", end="")
+            console.print(f" {text}", markup=False, highlight=False)
+
+    # -- chat ------------------------------------------------------------------
+    def _render_event(self, event: AgentEvent) -> None:
+        """Render one agent event. Model/tool text is printed verbatim."""
+        if event.type is EventType.TOOL_CALL:
+            console.print(f"⚙ {event.text}", style="dim cyan", markup=False, highlight=False)
+        elif event.type is EventType.TOOL_RESULT:
+            preview = event.text if len(event.text) <= 400 else event.text[:400] + " …"
+            console.print(
+                f"← {event.tool}: {preview}",
+                style="dim",
+                markup=False,
+                highlight=False,
+            )
+        elif event.type is EventType.ERROR:
+            console.print(f"⚠ {event.text}", style="red", markup=False, highlight=False)
+        elif event.type is EventType.FINAL:
+            console.print("Nocki: ", style="bold green", end="")
+            console.print(event.text, markup=False, highlight=False)
+
+    def chat(self, message: str) -> None:
+        for event in self.service.stream_events(message, session_id=self.session_id):
+            self._render_event(event)
 
     # -- main loop -----------------------------------------------------------
-    def chat(self, message: str) -> None:
-        console.print("[bold green]Nocki:[/bold green] ", end="")
-        collected: list[str] = []
-        for chunk in self.runtime.stream(message, session_id=self.session_id):
-            collected.append(chunk)
-            # markup/highlight off: streamed model text must be printed verbatim
-            # (brackets, backticks, etc. are content, not Rich markup).
-            console.print(chunk, end="", markup=False, highlight=False)
-        console.print()  # newline after stream
-
     def run(self) -> int:
         self.print_banner()
         self.check_backend()

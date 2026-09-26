@@ -36,3 +36,39 @@ def test_ensure_directories(tmp_path):
     s.ensure_directories()
     assert (tmp_path / "ws").exists()
     assert (tmp_path / "d").exists()
+
+
+def test_security_defaults_are_safe():
+    s = Settings(_env_file=None)
+    assert s.allow_shell is False
+    assert s.allow_file_write is False
+    assert s.allow_python_exec is False
+    assert s.require_confirmation is True
+
+
+def test_tool_limits_defaults():
+    s = Settings(_env_file=None)
+    assert s.max_file_read_bytes == 200_000
+    assert s.search_max_results == 50
+    assert s.search_max_files == 2_000
+    assert s.python_exec_timeout == 10
+
+
+def test_security_env_overrides(monkeypatch):
+    monkeypatch.setenv("ALLOW_PYTHON_EXEC", "true")
+    monkeypatch.setenv("PYTHON_EXEC_TIMEOUT", "30")
+    monkeypatch.setenv("MAX_FILE_READ_BYTES", "1000")
+    s = Settings(_env_file=None)
+    assert s.allow_python_exec is True
+    assert s.python_exec_timeout == 30
+    assert s.max_file_read_bytes == 1000
+
+
+def test_invalid_values_rejected():
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, python_exec_timeout=-1)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, max_iterations=0)

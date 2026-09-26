@@ -13,7 +13,8 @@ import urllib.error
 import urllib.request
 from collections.abc import Iterator, Sequence
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.tools import BaseTool
 from langchain_ollama import ChatOllama
 
 from app.config import Settings, get_settings
@@ -21,11 +22,14 @@ from app.llm.base import (
     LLMProvider,
     LLMUnavailableError,
     ModelNotFoundError,
+    content_to_text,
 )
 
 
 class OllamaProvider(LLMProvider):
-    """LLMProvider backed by a local Ollama server."""
+    """LLMProvider backed by a local Ollama server (with native tool calling)."""
+
+    supports_tools = True
 
     def __init__(
         self,
@@ -52,6 +56,11 @@ class OllamaProvider(LLMProvider):
                 client_kwargs={"timeout": self.request_timeout},
             )
         return self._client
+
+    def set_model(self, model: str) -> None:
+        """Switch to another model at runtime (client is rebuilt lazily)."""
+        self.model = model
+        self._client = None
 
     def _list_models(self) -> list[str]:
         """Query the Ollama server for installed models. Raises if unreachable."""
@@ -88,17 +97,27 @@ class OllamaProvider(LLMProvider):
                 f"Run: ollama pull {self.model}. Installed: {', '.join(installed) or 'none'}"
             )
 
-    def chat(self, messages: Sequence[BaseMessage]) -> str:
+    def invoke(
+        self,
+        messages: Sequence[BaseMessage],
+        tools: Sequence[BaseTool] | None = None,
+    ) -> AIMessage:
+        """Invoke the model, optionally with tools bound.
+
+        The raw AIMessage is returned as-is so the graph can inspect
+        `tool_calls` and route accordingly.
+        """
         try:
-            result = self.client.invoke(list(messages))
+            bound = self.client.bind_tools(list(tools)) if tools else self.client
+            result: AIMessage = bound.invoke(list(messages))
         except Exception as exc:  # noqa: BLE001 — normalize backend errors
             raise self._wrap(exc) from exc
-        return _content_to_text(result.content)
+        return result
 
     def stream(self, messages: Sequence[BaseMessage]) -> Iterator[str]:
         try:
             for chunk in self.client.stream(list(messages)):
-                text = _content_to_text(chunk.content)
+                text = content_to_text(chunk.content)
                 if text:
                     yield text
         except Exception as exc:  # noqa: BLE001
@@ -115,21 +134,6 @@ class OllamaProvider(LLMProvider):
                 f"Model '{self.model}' is not installed. Run: ollama pull {self.model}"
             )
         return exc
-
-
-def _content_to_text(content: object) -> str:
-    """Normalize LangChain message content (str or list of parts) to text."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for part in content:
-            if isinstance(part, str):
-                parts.append(part)
-            elif isinstance(part, dict) and "text" in part:
-                parts.append(str(part["text"]))
-        return "".join(parts)
-    return str(content)
 
 
 def build_llm(settings: Settings | None = None) -> OllamaProvider:
