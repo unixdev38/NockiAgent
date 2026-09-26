@@ -12,7 +12,7 @@ from __future__ import annotations
 import sys
 import uuid
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -22,6 +22,8 @@ from app.config import get_settings, reload_settings
 from app.llm.base import ModelNotFoundError
 from app.llm.ollama import build_llm
 from app.logging_config import setup_logging
+from app.memory.database import Database
+from app.memory.manager import MemoryManager
 from app.tools.registry import build_default_registry
 
 console = Console()
@@ -38,8 +40,10 @@ HELP = """\
   /tools       Lister les outils disponibles
   /model       Afficher / changer le modèle (ex: /model qwen3)
   /workspace   Afficher le workspace
+  /sessions    Lister les sessions enregistrées
+  /session     Basculer vers une session existante (ex: /session abc123)
   /clear       Nouvelle conversation
-  /history     Historique de la session
+  /history     Historique de la session (persistant)
   /exit        Quitter
 """
 
@@ -51,8 +55,16 @@ class NockiCLI:
         setup_logging(self.settings.log_level.value)
         self.llm = build_llm(self.settings)
         self.registry = build_default_registry(self.settings)
-        self.runtime = AgentRuntime(self.llm, self.settings, registry=self.registry)
+        self.database = Database(self.settings.database_path)
+        self.memory = MemoryManager(self.database)
         self.session_id = uuid.uuid4().hex[:8]
+        self.runtime = self._build_runtime()
+
+    def _build_runtime(self) -> AgentRuntime:
+        """Runtime wired with the persistent memory and the tool registry."""
+        return AgentRuntime(
+            self.llm, self.settings, registry=self.registry, memory=self.memory
+        )
 
     # -- rendering -----------------------------------------------------------
     def print_banner(self) -> None:
@@ -107,6 +119,10 @@ class NockiCLI:
             console.print(f"[green]Nouvelle conversation[/green] (session {self.session_id}).")
         elif cmd == "/history":
             self._show_history()
+        elif cmd == "/sessions":
+            self._show_sessions()
+        elif cmd == "/session":
+            self._switch_session(arg)
         else:
             console.print(f"[yellow]Commande inconnue: {cmd}[/yellow] — tape /help.")
         return True
@@ -129,9 +145,34 @@ class NockiCLI:
         os.environ["OLLAMA_MODEL"] = arg
         self.settings = reload_settings()
         self.llm = build_llm(self.settings)
-        self.runtime = AgentRuntime(self.llm, self.settings, registry=self.registry)
+        self.runtime = self._build_runtime()
         console.print(f"[green]Modèle changé:[/green] {arg}")
         self.check_backend()
+
+    def _show_sessions(self) -> None:
+        sessions = self.memory.list_sessions()
+        if not sessions:
+            console.print("[dim]Aucune session enregistrée.[/dim]")
+            return
+        table = Table(title="Sessions")
+        table.add_column("ID", style="cyan")
+        table.add_column("Mise à jour")
+        table.add_column("Messages", justify="right")
+        for info in sessions:
+            marker = " (courante)" if info.id == self.session_id else ""
+            updated = info.updated_at.strftime("%Y-%m-%d %H:%M")
+            table.add_row(info.id + marker, updated, str(info.message_count))
+        console.print(table)
+
+    def _switch_session(self, arg: str) -> None:
+        if not arg:
+            console.print("Usage: /session <id>  (voir /sessions)")
+            return
+        if self.memory.get_session(arg) is None:
+            console.print(f"[yellow]Session inconnue: {arg}[/yellow] — voir /sessions.")
+            return
+        self.session_id = arg
+        console.print(f"[green]Session active:[/green] {arg} (/history pour le contexte).")
 
     def _show_history(self) -> None:
         messages = self.runtime.history(self.session_id)
@@ -139,10 +180,15 @@ class NockiCLI:
             console.print("[dim]Historique vide.[/dim]")
             return
         for msg in messages:
-            role = "You" if isinstance(msg, HumanMessage) else "Nocki"
-            style = "cyan" if isinstance(msg, HumanMessage) else "green"
+            if isinstance(msg, HumanMessage):
+                role, style = "You", "cyan"
+            elif isinstance(msg, AIMessage):
+                role, style = "Nocki", "green"
+            else:
+                role, style = type(msg).__name__, "dim"
             text = msg.content if isinstance(msg.content, str) else str(msg.content)
-            console.print(f"[bold {style}]{role}:[/bold {style}] {text}")
+            console.print(f"{role}:", style=f"bold {style}", end="")
+            console.print(f" {text}", markup=False, highlight=False)
 
     # -- chat ------------------------------------------------------------------
     def _render_event(self, event: AgentEvent) -> None:

@@ -126,7 +126,7 @@ class AgentRuntime:
         assert self.memory is not None  # only called when memory is enabled
         history = self.memory.load_conversation(session_id)
         messages: list[BaseMessage] = list(history)
-        context_block = self.memory.build_context_block(message)
+        context_block = self.memory.build_context_block(message, session_id=session_id)
         if context_block:
             messages.append(SystemMessage(content=context_block))
         messages.append(HumanMessage(content=message))
