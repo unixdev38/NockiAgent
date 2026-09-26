@@ -1,0 +1,60 @@
+[project]
+name = "nocki-agent"
+version = "0.1.0"
+description = "Nocki Agent — a fully local, modular and secure AI agent (LangGraph + Ollama)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Nocki Agent" }]
+
+# Core dependencies for Phase 1 (Ollama + LangGraph + CLI).
+# Later phases add optional dependency groups (see [project.optional-dependencies]).
+dependencies = [
+    "langgraph>=1.0,<2.0",
+    "langchain-core>=1.0,<2.0",
+    "langchain-ollama>=1.0,<2.0",
+    "pydantic>=2.7,<3.0",
+    "pydantic-settings>=2.2,<3.0",
+    "python-dotenv>=1.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+# Phase 5 — HTTP API + streaming
+api = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "sse-starlette>=2.0",
+]
+# Phase 6 — RAG / embeddings / vector store
+rag = [
+    "langchain-community>=0.3",
+    "chromadb>=0.5",
+]
+# Development / tests
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+nocki = "app.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Nocki Agent (project-specific) ---
+/data/
+/workspace/
+*.sqlite
+*.sqlite3
+nocki.db
