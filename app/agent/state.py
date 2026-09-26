@@ -12,6 +12,7 @@ without breaking the graph signature.
 
 from __future__ import annotations
 
+import operator
 from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import AnyMessage
@@ -56,10 +57,10 @@ class AgentState(TypedDict, total=False):
     # The user's current task/request (plain text).
     task: str
 
-    # Structured intermediate reasoning artifacts (populated in later phases).
+    # Structured intermediate reasoning artifacts. Accumulate across iterations.
     plan: Plan | None
-    tool_calls: list[ToolCall]
-    observations: list[Observation]
+    tool_calls: Annotated[list[ToolCall], operator.add]
+    observations: Annotated[list[Observation], operator.add]
 
     # Loop control.
     iteration: int
@@ -67,7 +68,7 @@ class AgentState(TypedDict, total=False):
 
     # Terminal output + any accumulated non-fatal errors.
     final_answer: str | None
-    errors: list[str]
+    errors: Annotated[list[str], operator.add]
 
 
 def new_state(task: str, max_iterations: int) -> AgentState:

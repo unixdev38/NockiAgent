@@ -65,7 +65,14 @@ class Settings(BaseSettings):
     # --- Security -----------------------------------------------------------
     allow_shell: bool = Field(default=False)
     allow_file_write: bool = Field(default=False)
+    allow_python_exec: bool = Field(default=False)
     require_confirmation: bool = Field(default=True)
+
+    # --- Tools --------------------------------------------------------------
+    max_file_read_bytes: int = Field(default=200_000, gt=0)
+    search_max_results: int = Field(default=50, gt=0)
+    search_max_files: int = Field(default=2_000, gt=0)
+    python_exec_timeout: int = Field(default=10, gt=0, le=600)
 
     # --- Memory -------------------------------------------------------------
     database_path: Path = Field(default=Path("./data/nocki.db"))
