@@ -1,0 +1,833 @@
+# Mission
+
+Tu es un **Senior AI Engineer spécialisé en Python, LangGraph, LLM locaux, architecture logicielle et agents autonomes**.
+
+Ta mission est de concevoir et implémenter un **agent IA entièrement local** fonctionnant sur Windows, sans dépendance obligatoire à une API cloud.
+
+Le projet doit être conçu comme un véritable projet logiciel maintenable, et non comme un simple script de démonstration.
+
+---
+
+# Objectif
+
+Créer un agent personnel local appelé provisoirement **Nocki Agent**.
+
+L'agent doit utiliser :
+
+* Python 3.13+
+* LangGraph
+* LangChain
+* Ollama
+* un modèle LLM local compatible avec Ollama
+* SQLite pour la mémoire persistante
+* Pydantic pour les schémas et validations
+* Git pour le versionnement
+
+Le modèle LLM doit être interchangeable.
+
+Exemple :
+
+```text
+gemma3:1b
+qwen3
+llama
+```
+
+Ne jamais coupler l'application directement à un modèle particulier.
+
+---
+
+# Principe fondamental
+
+Séparer strictement :
+
+```text
+LLM
+│
+├── Reasoning
+│
+├── Agent
+│
+├── Tools
+│
+├── Memory
+│
+├── Graph / Workflow
+│
+├── Security
+│
+└── Interface
+```
+
+LangGraph doit être responsable de l'orchestration du workflow.
+
+Ollama doit uniquement fournir l'inférence du modèle.
+
+Les outils doivent être indépendants du LLM.
+
+---
+
+# Architecture souhaitée
+
+Construire une architecture similaire à :
+
+```text
+                    ┌─────────────────┐
+                    │      User       │
+                    └────────┬────────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │   Agent API     │
+                    └────────┬────────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │    LangGraph    │
+                    │                 │
+                    │ Agent State     │
+                    │ Planner         │
+                    │ Tool Router     │
+                    │ Validator       │
+                    └────────┬────────┘
+                             │
+          ┌──────────────────┼──────────────────┐
+          ▼                  ▼                  ▼
+     ┌─────────┐        ┌─────────┐       ┌─────────┐
+     │  Tools  │        │ Memory  │       │  LLM    │
+     └────┬────┘        └────┬────┘       └────┬────┘
+          │                  │                  │
+          ▼                  ▼                  ▼
+       Python             SQLite              Ollama
+       Files              History             Local LLM
+       Git                Context
+       Tests
+```
+
+---
+
+# Fonctionnement de l'agent
+
+L'agent doit fonctionner avec une boucle contrôlée :
+
+```text
+User Request
+     ↓
+Understand
+     ↓
+Plan
+     ↓
+Select Tool
+     ↓
+Execute Tool
+     ↓
+Observe Result
+     ↓
+Evaluate
+     ↓
+Continue / Finish
+```
+
+Le workflow doit être implémenté avec LangGraph.
+
+Éviter une boucle infinie.
+
+Ajouter :
+
+* maximum d'itérations
+* timeout
+* gestion des erreurs
+* possibilité d'arrêter l'exécution
+* validation des résultats
+
+---
+
+# State LangGraph
+
+Créer un état fortement typé.
+
+Exemple conceptuel :
+
+```python
+class AgentState:
+    messages
+    task
+    plan
+    tool_calls
+    observations
+    iteration
+    final_answer
+    errors
+```
+
+Utiliser des types explicites et éviter les dictionnaires non structurés partout.
+
+Le State doit être suffisamment flexible pour évoluer.
+
+---
+
+# Tools
+
+Créer un système de tools extensible.
+
+Commencer avec :
+
+## 1. Calculator
+
+Permettre :
+
+```text
+2 + 2
+15 * 42
+sqrt(...)
+```
+
+Ne pas utiliser `eval()` de manière dangereuse.
+
+---
+
+## 2. File Reader
+
+Permettre à l'agent de lire un fichier autorisé.
+
+Exemple :
+
+```text
+read_file("README.md")
+```
+
+Restrictions :
+
+* empêcher les chemins arbitraires
+* empêcher les accès hors du workspace
+* gérer les fichiers inexistants
+* limiter la taille des fichiers
+* retourner des erreurs propres
+
+---
+
+## 3. File Search
+
+Permettre :
+
+```text
+search_code("APIView")
+search_code("OneToOneField")
+search_code("TODO")
+```
+
+L'agent doit pouvoir rechercher dans le workspace.
+
+---
+
+## 4. Directory Listing
+
+Permettre :
+
+```text
+list_directory()
+```
+
+Exemple :
+
+```text
+project/
+├── manage.py
+├── config/
+├── users/
+├── products/
+└── requirements.txt
+```
+
+---
+
+## 5. Python Runner
+
+Créer un outil permettant éventuellement d'exécuter du Python.
+
+IMPORTANT :
+
+Cette fonctionnalité doit être conçue avec une architecture de sécurité.
+
+Ne jamais permettre par défaut au modèle d'exécuter n'importe quelle commande système.
+
+Prévoir :
+
+```text
+sandbox
+timeout
+workspace restriction
+resource limitation
+```
+
+Si une vraie sandbox n'est pas disponible sur Windows, expliquer clairement les limitations et désactiver l'exécution dangereuse par défaut.
+
+---
+
+## 6. Git
+
+Créer des outils :
+
+```text
+git_status()
+git_diff()
+git_log()
+```
+
+Dans un premier temps :
+
+* lecture uniquement
+
+Ne pas permettre automatiquement :
+
+```text
+git push
+git reset --hard
+git clean
+```
+
+sans confirmation explicite de l'utilisateur.
+
+---
+
+# Workspace
+
+L'agent doit travailler dans un workspace défini explicitement.
+
+Exemple :
+
+```text
+C:\Users\HP\Projects
+```
+
+Toutes les opérations fichiers doivent être limitées à ce workspace.
+
+Créer une configuration :
+
+```yaml
+workspace:
+  path: "C:/Users/HP/Projects"
+
+security:
+  allow_shell: false
+  allow_file_write: false
+  require_confirmation: true
+```
+
+---
+
+# Mémoire
+
+Implémenter une mémoire persistante avec SQLite.
+
+Séparer :
+
+```text
+Conversation history
+Short-term memory
+Long-term memory
+Agent state
+```
+
+Ne pas envoyer automatiquement toute la mémoire au LLM.
+
+Créer un mécanisme de récupération de contexte pertinent.
+
+---
+
+# RAG
+
+Préparer l'architecture pour ajouter ultérieurement un système RAG.
+
+Ne pas obligatoirement implémenter le RAG dans la première version.
+
+L'architecture doit pouvoir évoluer vers :
+
+```text
+Documents
+    ↓
+Chunking
+    ↓
+Embeddings
+    ↓
+Vector Store
+    ↓
+Retriever
+    ↓
+Agent
+```
+
+Prévoir une interface abstraite pour le retriever.
+
+---
+
+# Configuration
+
+Utiliser un fichier `.env` ou une configuration centralisée.
+
+Exemple :
+
+```env
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=gemma3:1b
+MAX_ITERATIONS=8
+AGENT_TIMEOUT=120
+WORKSPACE_PATH=C:/Users/HP/Projects
+```
+
+Ne jamais hardcoder ces valeurs dans le code.
+
+---
+
+# Structure du projet
+
+Créer une structure similaire à :
+
+```text
+nocki-agent/
+│
+├── app/
+│   ├── __init__.py
+│   │
+│   ├── agent/
+│   │   ├── graph.py
+│   │   ├── state.py
+│   │   ├── nodes.py
+│   │   ├── prompts.py
+│   │   └── router.py
+│   │
+│   ├── llm/
+│   │   └── ollama.py
+│   │
+│   ├── tools/
+│   │   ├── calculator.py
+│   │   ├── filesystem.py
+│   │   ├── search.py
+│   │   ├── git.py
+│   │   └── python_runner.py
+│   │
+│   ├── memory/
+│   │   ├── database.py
+│   │   ├── repository.py
+│   │   └── models.py
+│   │
+│   ├── security/
+│   │   ├── permissions.py
+│   │   ├── sandbox.py
+│   │   └── validation.py
+│   │
+│   ├── config.py
+│   └── main.py
+│
+├── tests/
+│
+├── .env.example
+├── pyproject.toml
+├── README.md
+└── .gitignore
+```
+
+Tu peux modifier cette structure si une meilleure architecture est justifiée.
+
+---
+
+# Prompt système de l'agent
+
+Créer un system prompt robuste.
+
+L'agent doit comprendre qu'il est un assistant local capable d'utiliser des outils.
+
+Il doit :
+
+1. comprendre la demande ;
+2. déterminer si un outil est nécessaire ;
+3. choisir l'outil approprié ;
+4. exécuter l'outil ;
+5. analyser le résultat ;
+6. recommencer si nécessaire ;
+7. répondre clairement à l'utilisateur.
+
+Il ne doit jamais prétendre avoir exécuté une action qu'il n'a pas réellement exécutée.
+
+Exemple :
+
+```text
+Tu es Nocki Agent, un agent IA local.
+
+Tu disposes d'outils permettant d'inspecter et d'analyser
+un workspace.
+
+Tu dois toujours distinguer :
+
+- ce que tu sais ;
+- ce que tu déduis ;
+- ce que tu as réellement vérifié avec un outil.
+
+Tu ne dois jamais inventer le résultat d'un outil.
+
+Avant toute opération destructive, demande confirmation.
+```
+
+---
+
+# Gestion des permissions
+
+Créer trois niveaux :
+
+```text
+READ
+WRITE
+EXECUTE
+```
+
+Exemple :
+
+```text
+READ
+├── read_file
+├── search_code
+├── list_directory
+└── git_status
+
+WRITE
+├── write_file
+└── edit_file
+
+EXECUTE
+├── run_python
+├── run_tests
+└── shell_command
+```
+
+Par défaut :
+
+```text
+READ = autorisé
+WRITE = confirmation
+EXECUTE = confirmation
+```
+
+---
+
+# API
+
+Préparer une API locale.
+
+Utiliser FastAPI si cela simplifie l'architecture.
+
+Endpoints minimum :
+
+```text
+POST /chat
+GET  /health
+GET  /sessions
+GET  /sessions/{id}
+DELETE /sessions/{id}
+```
+
+Exemple :
+
+```json
+{
+  "message": "Analyse mon projet Django",
+  "session_id": "abc123"
+}
+```
+
+Réponse :
+
+```json
+{
+  "session_id": "abc123",
+  "response": "...",
+  "tools_used": [
+    "list_directory",
+    "search_code"
+  ]
+}
+```
+
+---
+
+# Streaming
+
+Prévoir le streaming des réponses.
+
+L'utilisateur doit pouvoir voir progressivement :
+
+```text
+Agent:
+Je vais analyser ton projet...
+
+Tool:
+list_directory
+
+Tool result:
+...
+
+Agent:
+J'ai trouvé...
+```
+
+Utiliser une architecture compatible SSE/WebSocket si nécessaire.
+
+---
+
+# Observabilité
+
+Ajouter des logs structurés.
+
+Exemple :
+
+```text
+INFO  Agent started
+INFO  Task received
+INFO  Tool selected: search_code
+INFO  Tool completed
+INFO  Agent iteration: 2
+INFO  Agent completed
+```
+
+Ne jamais logger :
+
+* mots de passe
+* tokens
+* secrets
+* données sensibles
+
+---
+
+# Tests
+
+Créer des tests unitaires pour :
+
+```text
+State
+Tools
+Security
+Memory
+Graph
+Configuration
+```
+
+Créer également quelques tests d'intégration.
+
+Tester notamment :
+
+```text
+Agent sans outil
+Agent avec un outil
+Agent avec plusieurs outils
+Tool error
+LLM unavailable
+Ollama unavailable
+File inaccessible
+Path traversal
+Maximum iterations
+Timeout
+```
+
+---
+
+# Gestion des erreurs
+
+L'application doit gérer proprement :
+
+```text
+Ollama offline
+Model missing
+Tool failure
+Invalid tool arguments
+Timeout
+Permission denied
+File not found
+Malformed LLM response
+Infinite loop
+```
+
+Ne jamais laisser une exception non contrôlée faire planter tout l'agent.
+
+---
+
+# Interface CLI initiale
+
+Avant de créer une interface graphique, créer une CLI :
+
+```bash
+python -m app.main
+```
+
+Interface :
+
+```text
+╭──────────────────────────────╮
+│       Nocki Agent            │
+│       Local AI Agent         │
+╰──────────────────────────────╯
+
+Model: gemma3:1b
+Workspace: C:/Users/HP/Projects
+
+You:
+>
+```
+
+Commandes :
+
+```text
+/help
+/tools
+/model
+/workspace
+/clear
+/history
+/exit
+```
+
+---
+
+# Sécurité
+
+La sécurité est une priorité.
+
+Ne jamais donner automatiquement au LLM :
+
+```text
+accès administrateur
+accès complet au système
+accès à tous les fichiers
+exécution shell illimitée
+suppression de fichiers
+```
+
+L'agent doit être considéré comme **non fiable**.
+
+Le LLM peut demander une action dangereuse sans comprendre les conséquences.
+
+L'application doit donc appliquer les permissions indépendamment du modèle.
+
+---
+
+# Première version
+
+Ne cherche pas à construire immédiatement un agent gigantesque.
+
+Implémenter d'abord :
+
+```text
+Phase 1
+───────
+Ollama
++
+LangGraph
++
+CLI
++
+simple conversation
+```
+
+Puis :
+
+```text
+Phase 2
+───────
+Tools
+├── calculator
+├── list_directory
+├── read_file
+└── search_code
+```
+
+Puis :
+
+```text
+Phase 3
+───────
+Memory
++
+SQLite
+```
+
+Puis :
+
+```text
+Phase 4
+───────
+Git
++
+code analysis
+```
+
+Puis :
+
+```text
+Phase 5
+───────
+FastAPI
++
+streaming
+```
+
+Puis :
+
+```text
+Phase 6
+───────
+RAG
++
+embeddings
++
+vector database
+```
+
+Puis éventuellement :
+
+```text
+Phase 7
+───────
+React UI
+```
+
+---
+
+# Règles d'implémentation
+
+1. Utiliser du Python moderne.
+2. Utiliser les type hints.
+3. Utiliser Pydantic lorsque pertinent.
+4. Éviter les variables globales.
+5. Séparer clairement les responsabilités.
+6. Ne pas créer un fichier de 1000 lignes.
+7. Ne pas mettre toute la logique dans `main.py`.
+8. Documenter les décisions architecturales importantes.
+9. Ne pas utiliser de dépendance inutile.
+10. Privilégier les composants simples et remplaçables.
+11. Ne jamais hardcoder les chemins ou modèles.
+12. Prévoir l'évolution vers plusieurs modèles.
+13. Prévoir l'ajout de nouveaux tools sans modifier le cœur de l'agent.
+14. Prévoir la possibilité de remplacer Ollama plus tard.
+15. L'agent doit toujours distinguer raisonnement interne, appels outils et réponse utilisateur.
+
+---
+
+# Méthode de travail
+
+Ne génère pas tout le projet d'un seul coup.
+
+Travaille étape par étape.
+
+Pour chaque étape :
+
+1. expliquer brièvement l'objectif ;
+2. créer les fichiers nécessaires ;
+3. donner le code complet des fichiers modifiés ;
+4. expliquer les dépendances ;
+5. donner les commandes d'installation ;
+6. donner les commandes de lancement ;
+7. tester le résultat ;
+8. corriger les erreurs ;
+9. seulement ensuite passer à l'étape suivante.
+
+Commencer par **Phase 1 : Ollama + LangGraph + agent CLI minimal**.
+
+L'objectif final est d'obtenir un **agent IA local réellement fonctionnel, modulaire, sécurisé et extensible**, capable à terme d'analyser et d'interagir avec des projets de développement locaux.
