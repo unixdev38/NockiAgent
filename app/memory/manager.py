@@ -52,6 +52,7 @@ class MemoryManager:
         history_window: int = 20,
         short_term_keep: int = 20,
         retriever: Retriever | None = None,
+        rag_chunks: int = 3,
     ) -> None:
         self.database = database
         self.sessions = SessionRepository(database)
@@ -60,6 +61,7 @@ class MemoryManager:
         self.history_window = history_window
         self.short_term_keep = short_term_keep
         self.retriever = retriever
+        self.rag_chunks = rag_chunks
 
     # -- sessions --------------------------------------------------------------
     def ensure_session(self, session_id: str) -> SessionInfo:
@@ -169,7 +171,7 @@ class MemoryManager:
 
         if self.retriever is not None:
             try:
-                chunks = self.retriever.retrieve(query, k=3)
+                chunks = self.retriever.retrieve(query, k=self.rag_chunks)
             except Exception as exc:  # noqa: BLE001 — retrieval is optional context
                 logger.warning("Retriever failed: %s", exc)
                 chunks = []
