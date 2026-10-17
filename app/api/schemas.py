@@ -33,11 +33,14 @@ class ChatResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+    provider: str
+    llm_available: bool
     ollama_available: bool
     model: str
     workspace: str
     database_path: str
     tools: int
+    mcp_servers: int
     sessions: int
 
 
@@ -81,3 +84,19 @@ class SessionDetail(BaseModel):
 class DeleteResponse(BaseModel):
     deleted: bool
     session_id: str
+
+
+class MCPServerOut(BaseModel):
+    name: str
+    transport: str
+    state: str
+    permission: str
+    error: str | None = None
+    tools: list[str] = Field(default_factory=list)
+
+
+class UploadedFileOut(BaseModel):
+    name: str
+    path: str
+    size: int
+    extracted_path: str | None = None

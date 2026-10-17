@@ -223,3 +223,6 @@ __marimo__/
 *.sqlite
 *.sqlite3
 nocki.db
+
+# Nocki Agent — local MCP server definitions (may contain paths/secrets) and uploads
+/mcp_servers.json

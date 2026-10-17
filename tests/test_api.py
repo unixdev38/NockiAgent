@@ -250,3 +250,53 @@ def test_service_tool_specs(settings):
         assert all({"name", "permission", "description"} <= set(spec) for spec in specs)
     finally:
         service.close()
+
+
+# -- web UI, MCP, uploads --------------------------------------------------------
+def test_root_serves_chat_page(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "Nocki Agent" in response.text
+    assert "/static/app.js" in response.text
+
+
+def test_static_assets_served(client):
+    assert client.get("/static/app.js").status_code == 200
+    assert client.get("/static/styles.css").status_code == 200
+
+
+def test_health_reports_provider(client):
+    body = client.get("/health").json()
+    assert body["provider"] == "ollama"
+    assert body["llm_available"] is True
+    assert body["mcp_servers"] == 0
+
+
+def test_mcp_endpoint_empty_without_config(client):
+    assert client.get("/mcp").json() == []
+
+
+def test_upload_then_list_then_chat_can_read_it(client):
+    response = client.post(
+        "/files", files={"file": ("cours.md", b"# Cours\nLe sujet est X.", "text/markdown")}
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["path"] == "uploads/cours.md"
+    listed = client.get("/files").json()
+    assert [f["name"] for f in listed] == ["cours.md"]
+
+
+def test_upload_refused_with_400(client):
+    files = {"file": ("virus.exe", b"MZ", "application/octet-stream")}
+    response = client.post("/files", files=files)
+    assert response.status_code == 400
+    assert "non autorisé" in response.json()["detail"]
+
+
+def test_upload_size_limit_enforced(client, settings):
+    too_big = b"x" * (settings.upload_max_bytes + 10)
+    response = client.post("/files", files={"file": ("big.txt", too_big, "text/plain")})
+    assert response.status_code == 400
+    assert "volumineux" in response.json()["detail"]

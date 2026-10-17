@@ -13,6 +13,10 @@ dependencies = [
     "langgraph>=1.0,<2.0",
     "langchain-core>=1.0,<2.0",
     "langchain-ollama>=1.0,<2.0",
+    # Cloud LLM via OpenRouter (OpenAI-compatible API)
+    "langchain-openai>=1.0,<2.0",
+    # Model Context Protocol client (official SDK, v1 API)
+    "mcp>=1.2,<2.0",
     "pydantic>=2.7,<3.0",
     "pydantic-settings>=2.2,<3.0",
     "python-dotenv>=1.0",
@@ -20,11 +24,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Phase 5 — HTTP API + streaming
+# Phase 5 — HTTP API + streaming (+ chat web UI, uploads)
 api = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
     "sse-starlette>=2.0",
+    "python-multipart>=0.0.9",  # multipart uploads (POST /files)
+    "pypdf>=4.0",               # PDF → text for uploaded documents
 ]
 # Phase 6 — RAG / embeddings / vector store
 rag = [
@@ -40,6 +46,8 @@ dev = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
     "sse-starlette>=2.0",
+    "python-multipart>=0.0.9",
+    "pypdf>=4.0",
     "httpx>=0.27",
 ]
 
@@ -52,6 +60,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.api" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

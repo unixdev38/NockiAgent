@@ -56,7 +56,32 @@ class PermissionManager:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    def check(self, level: Permission) -> PermissionResult:
+    def check(self, level: Permission, *, external: bool = False) -> PermissionResult:
+        """Decide whether an action of `level` may run.
+
+        `external=True` marks tools provided by third-party MCP servers: their
+        reads are allowed like any workspace read, but any write/execute is gated
+        by `ALLOW_MCP_TOOLS` (default false) on top of the usual confirmation rule.
+        """
+        if external and level is not Permission.READ:
+            if not self.settings.allow_mcp_tools:
+                return PermissionResult(
+                    decision=Decision.DENY,
+                    reason="Outils MCP d'écriture/exécution désactivés (ALLOW_MCP_TOOLS=false).",
+                )
+            if self.settings.require_confirmation:
+                return PermissionResult(
+                    decision=Decision.CONFIRM,
+                    reason=(
+                        "Outil MCP autorisé mais confirmation requise "
+                        "(REQUIRE_CONFIRMATION=true)."
+                    ),
+                )
+            return PermissionResult(
+                decision=Decision.ALLOW,
+                reason="Outil MCP autorisé par la configuration.",
+            )
+
         if level is Permission.READ:
             # Reading inside the (already sandboxed) workspace is always fine.
             return PermissionResult(

@@ -1,7 +1,11 @@
 """FastAPI application factory.
 
 Routes:
-- GET  /health              — status snapshot (Ollama offline never 500s)
+- GET  /                    — chat web UI (single page, served from app/api/static)
+- GET  /health              — status snapshot (LLM offline never 500s)
+- GET  /mcp                 — MCP servers and their discovered tools
+- GET  /files               — uploaded documents (inside the workspace)
+- POST /files               — upload one document (multipart, size/type checked)
 - POST /chat                — one-shot chat turn (offloaded to a worker thread)
 - POST /chat/stream         — the same turn as Server-Sent Events
 - GET  /sessions            — list sessions
@@ -24,10 +28,14 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Annotated
 
 import anyio
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
 from app.api.schemas import (
@@ -35,12 +43,17 @@ from app.api.schemas import (
     ChatResponse,
     DeleteResponse,
     HealthResponse,
+    MCPServerOut,
     MessageOut,
     SessionDetail,
     SessionSummary,
+    UploadedFileOut,
 )
 from app.config import Settings, get_settings
+from app.documents.store import UploadError
 from app.service import NockiService
+
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 @asynccontextmanager
@@ -79,6 +92,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def _service(request: Request) -> NockiService:
         service: NockiService = request.app.state.service
         return service
+
+    # -- web UI -----------------------------------------------------------------
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    @app.get("/", include_in_schema=False)
+    async def index() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")
+
+    # -- MCP ----------------------------------------------------------------------
+    @app.get("/mcp", response_model=list[MCPServerOut])
+    async def mcp_servers(request: Request) -> list[MCPServerOut]:
+        statuses = await anyio.to_thread.run_sync(_service(request).mcp_status)
+        return [MCPServerOut(**status.model_dump()) for status in statuses]
+
+    # -- documents / uploads --------------------------------------------------------
+    @app.get("/files", response_model=list[UploadedFileOut])
+    async def list_files(request: Request) -> list[UploadedFileOut]:
+        files = await anyio.to_thread.run_sync(_service(request).uploads.list)
+        return [UploadedFileOut(**f.model_dump()) for f in files]
+
+    @app.post("/files", response_model=UploadedFileOut, status_code=201)
+    async def upload_file(
+        request: Request, file: Annotated[UploadFile, File()]
+    ) -> UploadedFileOut:
+        service = _service(request)
+        limit = service.settings.upload_max_bytes
+        # Read at most limit+1 bytes so an oversized upload is rejected without buffering it all.
+        data = await file.read(limit + 1)
+        filename = file.filename or ""
+        try:
+            saved = await anyio.to_thread.run_sync(
+                service.uploads.save, filename, data
+            )
+        except UploadError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return UploadedFileOut(**saved.model_dump())
 
     # -- health ---------------------------------------------------------------
     @app.get("/health", response_model=HealthResponse)

@@ -157,7 +157,7 @@ def _execute_with_permissions(
     if tool is None:
         return ToolResult(tool=name, ok=False, error=f"Outil inconnu: {name!r}")
 
-    decision = ctx.permissions.check(tool.permission)
+    decision = ctx.permissions.check(tool.permission, external=tool.external)
     if decision.denied:
         return ToolResult(
             tool=name,

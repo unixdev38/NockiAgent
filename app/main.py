@@ -18,7 +18,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from app.agent.graph import AgentEvent, EventType
-from app.config import get_settings
+from app.config import LLMProviderName, get_settings
 from app.llm.base import ModelNotFoundError
 from app.logging_config import setup_logging
 from app.service import NockiService
@@ -64,6 +64,17 @@ class NockiCLI:
         console.print("[dim]Tape /help pour les commandes.[/dim]\n")
 
     def check_backend(self) -> None:
+        if self.settings.llm_provider is LLMProviderName.OPENROUTER:
+            if not self.service.llm.is_available():
+                console.print(
+                    Panel.fit(
+                        "[yellow]⚠ Clé OpenRouter absente.[/yellow]\n"
+                        "Définis OPENROUTER_API_KEY dans le fichier .env.",
+                        title="Backend",
+                        border_style="yellow",
+                    )
+                )
+            return
         if not self.service.llm.is_available():
             console.print(
                 Panel.fit(

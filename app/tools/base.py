@@ -53,6 +53,8 @@ class Tool(ABC):
     name: ClassVar[str] = ""
     description: ClassVar[str] = ""
     permission: ClassVar[Permission] = Permission.READ
+    #: True for tools provided by external MCP servers (gated separately).
+    external: ClassVar[bool] = False
     args_schema: ClassVar[type[BaseModel]]
 
     def __init__(self, context: ToolContext) -> None:
