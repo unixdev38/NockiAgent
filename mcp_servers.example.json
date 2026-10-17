@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "files": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "./workspace"],
+      "permission": "read",
+      "timeout": 30
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "permission": "read",
+      "enabled": false
+    },
+    "remote-example": {
+      "url": "https://example.com/mcp",
+      "headers": { "Authorization": "Bearer ${MY_REMOTE_MCP_TOKEN}" },
+      "permission": "read",
+      "enabled": false
+    }
+  }
+}

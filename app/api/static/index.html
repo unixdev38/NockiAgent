@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nocki Agent — Chat</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar" id="sidebar">
+        <div class="brand">
+          <span class="logo">◆</span>
+          <span>Nocki Agent</span>
+          <button class="icon-btn only-mobile" id="close-sidebar" aria-label="Fermer le menu">✕</button>
+        </div>
+
+        <button class="primary-btn" id="new-chat">+ Nouvelle conversation</button>
+
+        <section>
+          <h2>Conversations</h2>
+          <ul class="list" id="sessions"></ul>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <h2>Documents</h2>
+            <button class="icon-btn" id="upload-btn" title="Envoyer un document" aria-label="Envoyer un document">＋</button>
+            <input type="file" id="file-input" multiple hidden
+              accept=".txt,.md,.csv,.json,.yaml,.yml,.toml,.xml,.html,.py,.js,.ts,.java,.go,.rs,.sql,.log,.pdf,.docx" />
+          </div>
+          <ul class="list" id="files"></ul>
+          <p class="hint">Les documents sont stockés dans le workspace (<code>uploads/</code>). L'agent peut les lire avec ses outils.</p>
+        </section>
+
+        <section>
+          <h2>Serveurs MCP</h2>
+          <ul class="list" id="mcp"></ul>
+        </section>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <button class="icon-btn only-mobile" id="open-sidebar" aria-label="Ouvrir le menu">☰</button>
+          <div class="title" id="chat-title">Nouvelle conversation</div>
+          <div class="status" id="status" title="État du modèle">
+            <span class="dot" id="status-dot"></span>
+            <span id="status-text">Connexion…</span>
+          </div>
+        </header>
+
+        <div class="messages" id="messages" aria-live="polite">
+          <div class="messages-inner" id="thread"></div>
+        </div>
+
+        <form class="composer" id="composer">
+          <div class="chips" id="chips"></div>
+          <div class="input-row">
+            <button type="button" class="icon-btn attach" id="attach-btn" title="Joindre un document" aria-label="Joindre un document">📎</button>
+            <textarea id="input" rows="1" placeholder="Écrivez votre message… (Entrée pour envoyer, Maj+Entrée pour aller à la ligne)"></textarea>
+            <button type="submit" class="send-btn" id="send" aria-label="Envoyer">➤</button>
+          </div>
+        </form>
+      </main>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

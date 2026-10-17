@@ -13,12 +13,18 @@ from uuid import uuid4
 
 from app.agent.graph import AgentEvent, AgentRuntime
 from app.config import Settings, get_settings
+from app.documents.store import UploadStore
 from app.llm.base import LLMProvider
-from app.llm.ollama import build_llm
+from app.llm.factory import build_llm
 from app.logging_config import get_logger
+from app.mcp.client import MCPManager, MCPServerStatus
+from app.mcp.config import MCPConfigError, load_mcp_config
+from app.mcp.tools import build_mcp_tools
 from app.memory.database import Database
 from app.memory.manager import MemoryManager
 from app.memory.models import MessageRecord, SessionInfo
+from app.security.validation import WorkspaceValidator
+from app.tools.base import ToolContext
 from app.tools.registry import ToolRegistry, build_default_registry
 
 logger = get_logger("nocki.service")
@@ -38,9 +44,38 @@ class NockiService:
         self.database = db or Database(self.settings.database_path)
         self.memory = MemoryManager(self.database)
         self.registry: ToolRegistry = build_default_registry(self.settings)
+        self.mcp = self._start_mcp()
+        self.uploads = UploadStore(
+            self.settings.uploads_path, self.settings.workspace, self.settings.upload_max_bytes
+        )
         self.runtime = AgentRuntime(
             self.llm, self.settings, registry=self.registry, memory=self.memory
         )
+
+    def _start_mcp(self) -> MCPManager | None:
+        """Connect the MCP servers listed in MCP_CONFIG_PATH and register their tools."""
+        try:
+            configs = load_mcp_config(self.settings.mcp_config_path)
+        except MCPConfigError as exc:
+            logger.error("Invalid MCP configuration: %s", exc)
+            return None
+        if not configs:
+            return None
+        manager = MCPManager(configs, startup_timeout=self.settings.mcp_startup_timeout)
+        manager.start()
+        context = ToolContext(
+            settings=self.settings,
+            validator=WorkspaceValidator(self.settings.workspace),
+        )
+        for tool in build_mcp_tools(context, manager):
+            try:
+                self.registry.register(tool)
+            except ValueError as exc:
+                logger.error("Skipping MCP tool: %s", exc)
+        return manager
+
+    def mcp_status(self) -> list[MCPServerStatus]:
+        return self.mcp.status() if self.mcp is not None else []
 
     # -- introspection ---------------------------------------------------------
     def health(self) -> dict:
@@ -49,13 +84,18 @@ class NockiService:
             sessions = len(self.memory.list_sessions())
         except Exception:  # noqa: BLE001 — health must always answer
             sessions = -1
+        available = self.llm.is_available()
+        provider = self.settings.llm_provider.value
         return {
             "status": "ok",
-            "ollama_available": self.llm.is_available(),
+            "provider": provider,
+            "llm_available": available,
+            "ollama_available": available if provider == "ollama" else False,
             "model": self.llm.model,
             "workspace": str(self.settings.workspace),
             "database_path": str(self.settings.database_path),
             "tools": len(self.registry),
+            "mcp_servers": len(self.mcp_status()),
             "sessions": sessions,
         }
 
@@ -110,5 +150,7 @@ class NockiService:
         logger.info("Model switched to %s", model)
 
     def close(self) -> None:
-        """Release resources (database)."""
+        """Release resources (MCP sessions, database)."""
+        if self.mcp is not None:
+            self.mcp.close()
         self.database.close()

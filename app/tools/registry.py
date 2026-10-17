@@ -34,6 +34,13 @@ class ToolRegistry:
             self._tools[tool.name] = tool
         self._langchain_cache: list[BaseTool] | None = None
 
+    def register(self, tool: Tool) -> None:
+        """Add a tool at runtime (e.g. tools discovered from MCP servers)."""
+        if tool.name in self._tools:
+            raise ValueError(f"Outil en double: {tool.name!r}")
+        self._tools[tool.name] = tool
+        self._langchain_cache = None
+
     # -- collection protocol ---------------------------------------------------
     def __iter__(self) -> Iterator[Tool]:
         return iter(self._tools.values())

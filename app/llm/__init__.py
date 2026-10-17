@@ -12,7 +12,9 @@ from app.llm.base import (
     ModelNotFoundError,
     content_to_text,
 )
-from app.llm.ollama import OllamaProvider, build_llm
+from app.llm.factory import build_llm
+from app.llm.ollama import OllamaProvider
+from app.llm.openrouter import OpenRouterProvider
 
 __all__ = [
     "LLMProvider",
@@ -20,6 +22,7 @@ __all__ = [
     "LLMUnavailableError",
     "ModelNotFoundError",
     "OllamaProvider",
+    "OpenRouterProvider",
     "build_llm",
     "content_to_text",
 ]
